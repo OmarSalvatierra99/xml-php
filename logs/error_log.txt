@@ -1,0 +1,8 @@
+[27-Nov-2025 11:35:44 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 11:50:35 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 11:52:22 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 11:53:12 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 11:54:58 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 12:19:57 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 12:19:57 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.
+[27-Nov-2025 12:23:21 America/Mexico_City] Advertencia: No se encontró una instalación válida de Python en el sistema.

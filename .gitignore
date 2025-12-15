@@ -1,0 +1,39 @@
+# Entorno virtual de Python
+venv/
+
+# Archivos de subida (uploads)
+uploads/
+
+# Archivos de configuración sensible (si es necesario)
+config.php
+
+# Logs
+*.log
+
+# Archivos temporales del sistema
+Thumbs.db
+.DS_Store
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+
+# Entornos de desarrollo
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Archivos compilados
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Paquetes de instaladores
+*.egg
+*.egg-info
+dist/
+build/uploads/*
