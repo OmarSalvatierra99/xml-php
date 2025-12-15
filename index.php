@@ -1,3 +1,4 @@
+:w0
 <?php
 include 'config.php';
 ?>
