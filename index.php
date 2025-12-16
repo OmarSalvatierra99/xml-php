@@ -1,7 +1,8 @@
-:w0
 <?php
+chdir(__DIR__);
 include 'config.php';
 ?>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
