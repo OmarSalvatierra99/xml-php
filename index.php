@@ -11,13 +11,17 @@ include 'config.php';
   <link rel="stylesheet" href="css/style.css">
   <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
 </head>
-<body>
+<body data-theme="light">
 
 <header class="dashboard-header">
   <!-- Logo institucional a la izquierda -->
   <img src="img/logo.png" alt="OFS Tlaxcala" class="ofs-logo">
 
   <!-- Información del usuario a la derecha -->
+  <div class="header-actions">
+    <button type="button" class="btn-toggle" id="themeToggle"><i class="fas fa-adjust"></i> Tema</button>
+  </div>
+
   <div class="user-info">
     <div>
       <h1><?php echo $full_name; ?></h1>
@@ -68,6 +72,24 @@ include 'config.php';
 <footer class="dashboard-footer">
   © <?php echo date('Y'); ?> Órgano de Fiscalización Superior del Estado de Tlaxcala 
 </footer>
+
+<script>
+(function() {
+  const body = document.body;
+  const toggle = document.getElementById('themeToggle');
+  const savedTheme = localStorage.getItem('ofs-theme');
+  if (savedTheme) {
+    body.setAttribute('data-theme', savedTheme);
+  }
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const current = body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      body.setAttribute('data-theme', current);
+      localStorage.setItem('ofs-theme', current);
+    });
+  }
+})();
+</script>
 
 </body>
 </html>

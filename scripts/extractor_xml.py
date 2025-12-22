@@ -1,65 +1,81 @@
-import xml.etree.ElementTree as ET
-import pandas as pd
 import os
 import sys
+import pandas as pd
+from typing import Dict, List, Optional
 
-def extraer_datos_cfdi(xml_file):
-    print(f"Processing file: {xml_file}")
+from xml_utils import (
+    IssueTracker,
+    find_all,
+    find_first,
+    get_attr,
+    load_xml_root,
+    normalize_text,
+    print_progress,
+    to_float,
+)
+
+
+NAMESPACES: Dict[str, str] = {
+    "cfdi": "http://www.sat.gob.mx/cfd/4",
+    "tfd": "http://www.sat.gob.mx/TimbreFiscalDigital",
+    "pago20": "http://www.sat.gob.mx/Pagos20",
+}
+
+
+def extraer_datos_cfdi(xml_file: str, tracker: IssueTracker) -> List[Dict[str, Optional[str]]]:
+    print_progress(f"Procesando: {os.path.basename(xml_file)}")
+    root = load_xml_root(xml_file, tracker)
+    if root is None:
+        return []
+
+    filas_datos: List[Dict[str, Optional[str]]] = []
+    version_cfdi = get_attr(root, "Version") or "N/A"
+    tipo_comprobante = get_attr(root, "TipoDeComprobante") or "N/A"
+
+    tfd = find_first(root, ".//tfd:TimbreFiscalDigital", NAMESPACES)
+    uuid = get_attr(tfd, "UUID") or "N/A"
+    if uuid == "N/A":
+        tracker.warn(f"UUID no encontrado en {os.path.basename(xml_file)}")
+
+    emisor = find_first(root, ".//cfdi:Emisor", NAMESPACES)
+    receptor = find_first(root, ".//cfdi:Receptor", NAMESPACES)
+
+    rfc_emisor = get_attr(emisor, "Rfc") or "N/A"
+    nombre_emisor = get_attr(emisor, "Nombre") or "Desconocido"
+    regimen_fiscal_emisor = get_attr(emisor, "RegimenFiscal") or "N/A"
+
+    rfc_receptor = get_attr(receptor, "Rfc") or "N/A"
+    nombre_receptor = get_attr(receptor, "Nombre") or "Desconocido"
+    uso_cfdi = get_attr(receptor, "UsoCFDI") or "N/A"
+
+    fecha = get_attr(root, "Fecha") or "N/A"
+    metodo_pago = get_attr(root, "MetodoPago") or "N/A"
+    forma_pago = get_attr(root, "FormaPago") or "N/A"
+    total_general = get_attr(root, "Total") or "0"
+    cp_proveedor = get_attr(root, "LugarExpedicion") or "N/A"
+
     try:
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
-    except Exception as e:
-        print(f"Error reading XML file {xml_file}: {e}", file=sys.stderr)
-        return [], None
-
-    # Namespaces for CFDI 4.0 and pagos
-    namespaces = {
-        'cfdi': 'http://www.sat.gob.mx/cfd/4',
-        'tfd': 'http://www.sat.gob.mx/TimbreFiscalDigital',
-        'pago20': 'http://www.sat.gob.mx/Pagos20',
-    }
-
-    filas_datos = []
-    version_cfdi = root.attrib.get('Version', 'N/A')
-
-    try:
-        # General data
-        tipo_comprobante = root.attrib.get('TipoDeComprobante', 'N/A')
-
-        tfd = root.find('.//tfd:TimbreFiscalDigital', namespaces)
-        uuid = tfd.attrib['UUID'] if tfd is not None else 'N/A'
-
-        emisor = root.find('.//cfdi:Emisor', namespaces)
-        rfc_emisor = emisor.attrib.get('Rfc', 'N/A') if emisor is not None else 'N/A'
-        nombre_emisor = emisor.attrib.get('Nombre', 'Desconocido') if emisor is not None else 'Desconocido'
-        regimen_fiscal_emisor = emisor.attrib.get('RegimenFiscal', 'N/A') if emisor is not None else 'N/A'
-
-        receptor = root.find('.//cfdi:Receptor', namespaces)
-        rfc_receptor = receptor.attrib.get('Rfc', 'N/A') if receptor is not None else 'N/A'
-        nombre_receptor = receptor.attrib.get('Nombre', 'Desconocido') if receptor is not None else 'Desconocido'
-        uso_cfdi = receptor.attrib.get('UsoCFDI', 'N/A') if receptor is not None else 'N/A'
-
-        fecha = root.attrib.get('Fecha', 'N/A')
-        metodo_pago = root.attrib.get('MetodoPago', 'N/A')
-        forma_pago = root.attrib.get('FormaPago', 'N/A')
-        total_general = root.attrib.get('Total', '0')
-        cp_proveedor = root.attrib.get('LugarExpedicion', 'N/A')
-
-        # Handle pagos (Tipo de Comprobante = "P")
         if tipo_comprobante == "P":
-            complemento_pagos = root.find('.//pago20:Pagos', namespaces)
-            if complemento_pagos is not None:
-                for pago in complemento_pagos.findall('.//pago20:Pago', namespaces):
-                    forma_pago_pago = pago.attrib.get('FormaDePagoP', 'N/A')
-                    monto_pago = float(pago.attrib.get('Monto', '0'))
-                    moneda_pago = pago.attrib.get('MonedaP', 'N/A')
+            complemento_pagos = find_first(root, ".//pago20:Pagos", NAMESPACES)
+            if complemento_pagos is None:
+                tracker.error(f"Complemento de pagos faltante en {os.path.basename(xml_file)}")
+                return filas_datos
 
-                    for docto_relacionado in pago.findall('.//pago20:DoctoRelacionado', namespaces):
-                        filas_datos.append({
+            for pago in find_all(complemento_pagos, ".//pago20:Pago", NAMESPACES):
+                forma_pago_pago = get_attr(pago, "FormaDePagoP") or "N/A"
+                monto_pago = to_float(get_attr(pago, "Monto"), 0.0, tracker, "Monto pago")
+
+                doctos = find_all(pago, ".//pago20:DoctoRelacionado", NAMESPACES)
+                if not doctos:
+                    tracker.warn(f"No hay DoctoRelacionado en pago de {os.path.basename(xml_file)}")
+
+                for docto_relacionado in doctos:
+                    filas_datos.append(
+                        {
                             "Tipo de Comprobante": tipo_comprobante,
                             "Folio CFDI (UUID)": uuid,
-                            "Folio CFDI (UUID) Relacionados": docto_relacionado.attrib.get('IdDocumento', 'N/A'),
-                            "Tipo Relación": docto_relacionado.attrib.get('TipoRelacion', 'N/A'),
+                            "Folio CFDI (UUID) Relacionados": get_attr(docto_relacionado, "IdDocumento") or "N/A",
+                            "Tipo Relación": get_attr(docto_relacionado, "TipoRelacion") or "N/A",
                             "Fecha": fecha,
                             "RFC Proveedor": rfc_emisor,
                             "Nombre Proveedor": nombre_emisor,
@@ -81,97 +97,114 @@ def extraer_datos_cfdi(xml_file):
                             "Impuesto Retenido": 0.0,
                             "Total por Concepto": monto_pago,
                             "Total General": total_general,
-                            "Versión CFDI": version_cfdi
-                        })
+                            "Versión CFDI": version_cfdi,
+                        }
+                    )
 
-        else:  # Handle tipos de comprobante "I" (Ingreso) y "E" (Egreso)
-            # Buscar relaciones en el nodo CfdiRelacionados
-            cfdi_relacionados = root.find('.//cfdi:CfdiRelacionados', namespaces)
-            tipo_relacion = cfdi_relacionados.attrib.get('TipoRelacion', 'N/A') if cfdi_relacionados is not None else 'N/A'
+        else:
+            cfdi_relacionados = find_first(root, ".//cfdi:CfdiRelacionados", NAMESPACES)
+            tipo_relacion = get_attr(cfdi_relacionados, "TipoRelacion") or "N/A"
 
-            conceptos = root.findall('.//cfdi:Concepto', namespaces)
+            conceptos = find_all(root, ".//cfdi:Concepto", NAMESPACES)
+            if not conceptos:
+                tracker.warn(f"No se encontraron conceptos en {os.path.basename(xml_file)}")
+
             for concepto in conceptos:
-                descripcion = concepto.attrib.get('Descripcion', 'N/A')
-                cantidad = float(concepto.attrib.get('Cantidad', '0'))
-                unidad = concepto.attrib.get('Unidad', 'N/A')
-                valor_unitario = float(concepto.attrib.get('ValorUnitario', '0'))
-                importe = float(concepto.attrib.get('Importe', '0'))
+                descripcion = get_attr(concepto, "Descripcion") or "N/A"
+                cantidad = to_float(get_attr(concepto, "Cantidad"), 0.0, tracker, "Cantidad")
+                unidad = get_attr(concepto, "Unidad") or "N/A"
+                valor_unitario = to_float(get_attr(concepto, "ValorUnitario"), 0.0, tracker, "ValorUnitario")
+                importe = to_float(get_attr(concepto, "Importe"), 0.0, tracker, "Importe")
 
-                traslado = concepto.find('.//cfdi:Traslado', namespaces)
-                impuesto_trasladado = float(traslado.attrib.get('Importe', '0')) if traslado is not None else 0.0
-                clave_impuesto_trasladado = traslado.attrib.get('Impuesto', 'N/A') if traslado is not None else 'N/A'
+                traslado = find_first(concepto, ".//cfdi:Traslado", NAMESPACES)
+                impuesto_trasladado = to_float(get_attr(traslado, "Importe"), 0.0, tracker, "Traslado")
+                clave_impuesto_trasladado = get_attr(traslado, "Impuesto") or "N/A"
 
-                retencion = concepto.find('.//cfdi:Retencion', namespaces)
-                impuesto_retenido = float(retencion.attrib.get('Importe', '0')) if retencion is not None else 0.0
-                clave_impuesto_retenido = retencion.attrib.get('Impuesto', 'N/A') if retencion is not None else 'N/A'
+                retencion = find_first(concepto, ".//cfdi:Retencion", NAMESPACES)
+                impuesto_retenido = to_float(get_attr(retencion, "Importe"), 0.0, tracker, "Retención")
+                clave_impuesto_retenido = get_attr(retencion, "Impuesto") or "N/A"
 
                 total_por_concepto = importe + impuesto_trasladado - impuesto_retenido
 
-                filas_datos.append({
-                    "Tipo de Comprobante": tipo_comprobante,
-                    "Folio CFDI (UUID)": uuid,
-                    "Folio CFDI (UUID) Relacionados": "N/A",
-                    "Tipo Relación": tipo_relacion,
-                    "Fecha": fecha,
-                    "RFC Proveedor": rfc_emisor,
-                    "Nombre Proveedor": nombre_emisor,
-                    "Régimen Fiscal Proveedor": regimen_fiscal_emisor,
-                    "CP del Proveedor": cp_proveedor,
-                    "RFC del Cliente": rfc_receptor,
-                    "Nombre del Cliente": nombre_receptor,
-                    "Uso del CFDI": uso_cfdi,
-                    "Método de Pago": metodo_pago,
-                    "Forma de Pago": forma_pago,
-                    "Descripción": descripcion,
-                    "Cantidad": cantidad,
-                    "Unidad": unidad,
-                    "Valor Unitario": valor_unitario,
-                    "Importe": importe,
-                    "Clave Impuesto Trasladado": clave_impuesto_trasladado,
-                    "Impuesto Trasladado": impuesto_trasladado,
-                    "Clave Impuesto Retenido": clave_impuesto_retenido,
-                    "Impuesto Retenido": impuesto_retenido,
-                    "Total por Concepto": total_por_concepto,
-                    "Total General": total_general,
-                    "Versión CFDI": version_cfdi
-                })
+                filas_datos.append(
+                    {
+                        "Tipo de Comprobante": tipo_comprobante,
+                        "Folio CFDI (UUID)": uuid,
+                        "Folio CFDI (UUID) Relacionados": "N/A",
+                        "Tipo Relación": tipo_relacion,
+                        "Fecha": fecha,
+                        "RFC Proveedor": rfc_emisor,
+                        "Nombre Proveedor": nombre_emisor,
+                        "Régimen Fiscal Proveedor": regimen_fiscal_emisor,
+                        "CP del Proveedor": cp_proveedor,
+                        "RFC del Cliente": rfc_receptor,
+                        "Nombre del Cliente": nombre_receptor,
+                        "Uso del CFDI": uso_cfdi,
+                        "Método de Pago": metodo_pago,
+                        "Forma de Pago": forma_pago,
+                        "Descripción": descripcion,
+                        "Cantidad": cantidad,
+                        "Unidad": unidad,
+                        "Valor Unitario": valor_unitario,
+                        "Importe": importe,
+                        "Clave Impuesto Trasladado": clave_impuesto_trasladado,
+                        "Impuesto Trasladado": impuesto_trasladado,
+                        "Clave Impuesto Retenido": clave_impuesto_retenido,
+                        "Impuesto Retenido": impuesto_retenido,
+                        "Total por Concepto": total_por_concepto,
+                        "Total General": total_general,
+                        "Versión CFDI": version_cfdi,
+                    }
+                )
 
-    except Exception as e:
-        print(f"Error processing file {xml_file}: {e}", file=sys.stderr)
-        return [], None
+    except Exception as exc:
+        tracker.error(f"Error procesando {os.path.basename(xml_file)}: {exc}")
+        return filas_datos
 
-    return filas_datos, version_cfdi
+    return filas_datos
 
 
-def procesar_archivos_xml_subidos(directorio):
-    todos_los_datos = []
+def procesar_archivos_xml_subidos(directorio: str, tracker: IssueTracker) -> Optional[str]:
+    todos_los_datos: List[Dict[str, Optional[str]]] = []
+    archivos = [f for f in os.listdir(directorio) if f.lower().endswith(".xml")]
 
-    archivos = [f for f in os.listdir(directorio) if f.endswith('.xml')]
+    if not archivos:
+        tracker.fatal("No se encontraron archivos XML para procesar.")
+        return None
 
     for filename in archivos:
         ruta_archivo = os.path.join(directorio, filename)
-        filas, version_cfdi = extraer_datos_cfdi(ruta_archivo)
+        filas = extraer_datos_cfdi(ruta_archivo, tracker)
         if filas:
             todos_los_datos.extend(filas)
 
-    if todos_los_datos:
+    if not todos_los_datos:
+        tracker.error("No se generaron datos procesables de los XML.")
+        return None
+
+    try:
         df = pd.DataFrame(todos_los_datos)
-        archivo_salida = os.path.join(directorio, 'cfdi_datos_extraidos.xlsx')
+        archivo_salida = os.path.join(directorio, "cfdi_datos_extraidos.xlsx")
         df.to_excel(archivo_salida, index=False)
         return archivo_salida
-
-    return None
+    except Exception as exc:
+        tracker.fatal(f"No se pudo generar el archivo Excel: {exc}")
+        return None
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        directorio = sys.argv[1]
-        archivo_excel = procesar_archivos_xml_subidos(directorio)
-        if archivo_excel:
-            print(archivo_excel)  # ✅ PHP recibirá esta ruta
-        else:
-            print("ERROR: No se procesaron archivos correctamente", file=sys.stderr)
-            sys.exit(1)
-    else:
+    tracker = IssueTracker()
+
+    if len(sys.argv) <= 1:
         print("ERROR: No se proporcionó directorio", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
+
+    directorio = sys.argv[1]
+    excel_path = procesar_archivos_xml_subidos(directorio, tracker)
+
+    tracker.report("CFDI")
+
+    if excel_path and tracker.exit_code == 0:
+        print(excel_path)
+
+    sys.exit(tracker.exit_code)
