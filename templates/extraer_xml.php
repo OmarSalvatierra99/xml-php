@@ -173,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
             $token = bin2hex(random_bytes(8));
             $_SESSION['downloads'][$token] = ['path' => $excelPath, 'tempDir' => $tempDir];
             $downloadLink = '?download=' . $token;
-            $autoDownload = true;
+            $autoDownload = false; // No auto-download - user control
             $infoMessage = $warnings ? "Archivo generado con advertencias." : "Archivo generado correctamente.";
         } elseif ($returnVar === 1) {
             $error = "Ocurrió un problema al procesar los XML. Vuelve a intentarlo y revisa los mensajes.";
@@ -192,28 +192,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Extracción de datos XML</title>
-    <link rel="stylesheet" href="../css/style.css?v=1">
+    <title>Extracción de datos XML | OFS Tlaxcala</title>
+    <link rel="stylesheet" href="../css/style.css?v=2">
     <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
 </head>
 <body data-theme="light">
-<header class="dashboard-header">
-    <div class="user-info">
+
+<a href="#mainContent" class="skip-link">Saltar al contenido principal</a>
+
+<header class="dashboard-header" role="banner">
+    <div class="ofs-logo">
+        <span class="logo-text">OFS</span>
+        <span class="logo-subtext">Tlaxcala</span>
+    </div>
+    <div class="user-info" aria-label="Información del usuario">
         <img src="../img/user-avatar.png" alt="Avatar" class="avatar">
         <div>
             <h1>Extracción de datos XML</h1>
-            <p><?php echo ucwords(str_replace('_', ' ', $role)); ?> | OFS Tlaxcala</p>
+            <p><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $role))); ?> | OFS Tlaxcala</p>
         </div>
     </div>
-    <div class="header-actions">
-        <button type="button" class="btn-toggle" id="themeToggle"><i class="fas fa-adjust"></i> Tema</button>
-        <a href="../index.php" class="btn-back"><i class="fas fa-arrow-left"></i> Volver</a>
-    </div>
+    <nav class="header-actions" role="navigation" aria-label="Acciones principales">
+        <button type="button" class="btn-toggle" id="themeToggle" aria-label="Cambiar tema de color">
+            <i class="fas fa-adjust" aria-hidden="true"></i> Tema
+        </button>
+        <a href="../index.php" class="btn-back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Volver</a>
+    </nav>
 </header>
 
-<main class="dashboard-main">
+<main class="dashboard-main" role="main" id="mainContent">
 <section class="tool-section">
-<h2><i class="fas fa-file-code"></i> Extraer datos de XML (CFDI)</h2>
+<h2><i class="fas fa-file-code" aria-hidden="true"></i> Extraer datos de XML (CFDI)</h2>
 
 <?php if ($error): ?>
 <div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> <?php echo $error; ?></div>
@@ -273,26 +282,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 </section>
 </main>
 
-<script>
-(function() {
-  const body = document.body;
-  const toggle = document.getElementById('themeToggle');
-  const savedTheme = localStorage.getItem('ofs-theme');
-  if (savedTheme) {
-    body.setAttribute('data-theme', savedTheme);
-  }
-  toggle.addEventListener('click', () => {
-    const current = body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    body.setAttribute('data-theme', current);
-    localStorage.setItem('ofs-theme', current);
-  });
+<footer class="dashboard-footer" role="contentinfo">
+  © <?php echo date('Y'); ?> Órgano de Fiscalización Superior del Estado de Tlaxcala
+</footer>
 
-  <?php if ($autoDownload && $downloadLink): ?>
-  setTimeout(function() {
-    window.location.href = "<?php echo $downloadLink; ?>";
-  }, 400);
-  <?php endif; ?>
-})();
-</script>
+<script src="../js/app.js?v=2"></script>
+
 </body>
 </html>

@@ -8,10 +8,10 @@ if (!isset($_SESSION['downloads'])) {
 }
 ob_start();
 
-$uploadDir = realpath(__DIR__ . '/../uploads/nomina/');
+$uploadDir = realpath(__DIR__ . '/../uploads/xml/');
 if (!$uploadDir) {
-    mkdir(__DIR__ . '/../uploads/nomina/', 0777, true);
-    $uploadDir = realpath(__DIR__ . '/../uploads/nomina/');
+    mkdir(__DIR__ . '/../uploads/xml/', 0777, true);
+    $uploadDir = realpath(__DIR__ . '/../uploads/xml/');
 }
 
 $maxUploadSize = 8 * 1024 * 1024; // 8MB por archivo
@@ -24,9 +24,10 @@ $warnings = [];
 $infoMessage = '';
 $downloadLink = '';
 $autoDownload = false;
+$validationStats = [];
 
-function log_technical_nomina($message) {
-    error_log("[NOMINA] " . $message);
+function log_technical($message) {
+    error_log("[VALIDADOR] " . $message);
 }
 
 function cleanup_temp_dir($path) {
@@ -72,9 +73,12 @@ function extract_excel_path($stdout) {
         if (!empty($decoded['file']) && preg_match('~\\.xlsx$~i', $decoded['file'])) {
             return $decoded['file'];
         }
+        if (!empty($decoded['stats'])) {
+            return [$decoded['path'] ?? $decoded['file'] ?? null, $decoded['stats']];
+        }
     }
 
-    if (preg_match_all('~(/[^\\s]+\\.xlsx)~i', $stdout, $matches) && !empty($matches[1])) {
+    if (preg_match_all('~(/[^\s]+\\.xlsx)~i', $stdout, $matches) && !empty($matches[1])) {
         return trim(end($matches[1]));
     }
 
@@ -105,11 +109,11 @@ if (isset($_GET['download']) && isset($_SESSION['downloads'][$_GET['download']])
         if ($realPath && strpos($realPath, $uploadDir) === 0 && file_exists($realPath)) {
             ob_clean();
             header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            header('Content-Disposition: attachment; filename="Nomina_Procesada.xlsx"');
+            header('Content-Disposition: attachment; filename="Validacion_CFDI.xlsx"');
             header('Content-Length: ' . filesize($realPath));
             readfile($realPath);
         } else {
-            log_technical_nomina("Descarga denegada o archivo no encontrado: {$entry['path']}");
+            log_technical("Descarga denegada o archivo no encontrado: {$entry['path']}");
         }
         cleanup_temp_dir($entry['tempDir']);
         unset($_SESSION['downloads'][$token]);
@@ -122,10 +126,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
     mkdir($tempDir, 0777, true);
 
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    foreach ($_FILES['archivos_xml']['tmp_name'] as $i => $tmp) {
-        $filename = basename($_FILES['archivos_xml']['name'][$i]);
-        $fileError = $_FILES['archivos_xml']['error'][$i];
-        $fileSize = $_FILES['archivos_xml']['size'][$i];
+    foreach ($_FILES['archivos_xml']['tmp_name'] as $key => $tmp) {
+        $filename = basename($_FILES['archivos_xml']['name'][$key]);
+        $fileError = $_FILES['archivos_xml']['error'][$key];
+        $fileSize = $_FILES['archivos_xml']['size'][$key];
 
         if ($fileError !== UPLOAD_ERR_OK || $fileSize <= 0) {
             $invalidFiles[$filename] = "Archivo vacío o no válido.";
@@ -139,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         if (!in_array($ext, $allowedExtensions, true)) {
-            $invalidFiles[$filename] = "Solo se permiten archivos XML.";
+            $invalidFiles[$filename] = "Solo se permiten archivos .xml.";
             continue;
         }
 
@@ -160,26 +164,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
     }
 
     if (!empty($uploadedFiles)) {
-        $scriptPath = realpath(__DIR__ . '/../scripts/extractor_nomina.py');
+        $scriptPath = realpath(__DIR__ . '/../scripts/validador_xml.py');
         $pythonExec = defined('PYTHON_PATH') && !empty(PYTHON_PATH) ? PYTHON_PATH : ($python_path ?? 'python3');
         [$stdout, $stderr, $returnVar] = run_python_script($pythonExec, $scriptPath, $tempDir);
 
-        $excelPath = extract_excel_path($stdout);
+        $result = extract_excel_path($stdout);
+        if (is_array($result)) {
+            [$excelPath, $validationStats] = $result;
+        } else {
+            $excelPath = $result;
+        }
         $warnings = parse_warnings($stderr);
 
-        log_technical_nomina("Resultado Nómina | exit={$returnVar} | path=" . ($excelPath ?: 'N/A') . " | stderr=" . trim($stderr));
+        log_technical("Resultado Validador | exit={$returnVar} | path=" . ($excelPath ?: 'N/A') . " | stderr=" . trim($stderr));
 
         if ($returnVar === 0 && $excelPath && file_exists($excelPath)) {
             $token = bin2hex(random_bytes(8));
             $_SESSION['downloads'][$token] = ['path' => $excelPath, 'tempDir' => $tempDir];
             $downloadLink = '?download=' . $token;
-            $autoDownload = false; // No auto-download - user control
-            $infoMessage = $warnings ? "Archivo generado con advertencias." : "Archivo generado correctamente.";
+            $autoDownload = false; // No auto-download for validation
+            $infoMessage = $warnings ? "Validación completada con advertencias." : "Validación completada correctamente.";
         } elseif ($returnVar === 1) {
-            $error = "Ocurrió un problema al procesar los XML de nómina. Vuelve a intentarlo y revisa los mensajes.";
+            $error = "Ocurrió un problema al validar los XML. Vuelve a intentarlo y revisa los mensajes.";
             cleanup_temp_dir($tempDir);
         } else {
-            $error = "No se pudo procesar los archivos de nómina.";
+            $error = "No se pudo validar los archivos XML. Verifica tu conexión a internet y que los archivos sean CFDI válidos.";
             cleanup_temp_dir($tempDir);
         }
     } else {
@@ -191,41 +200,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Extracción Nómina | OFS Tlaxcala</title>
-<link rel="stylesheet" href="../css/style.css?v=2">
-<script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <meta charset="UTF-8">
+    <title>Validar XML | OFS Tlaxcala</title>
+    <link rel="stylesheet" href="../css/style.css?v=1">
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
 </head>
 <body data-theme="light">
-
-<a href="#mainContent" class="skip-link">Saltar al contenido principal</a>
-
-<header class="dashboard-header" role="banner">
-    <div class="ofs-logo">
-        <span class="logo-text">OFS</span>
-        <span class="logo-subtext">Tlaxcala</span>
-    </div>
-    <div class="user-info" aria-label="Información del usuario">
+<header class="dashboard-header">
+    <div class="user-info">
         <img src="../img/user-avatar.png" alt="Avatar" class="avatar">
         <div>
-            <h1>Extracción de datos XML Nómina</h1>
-            <p><?php echo htmlspecialchars(ucwords(str_replace('_', ' ', $role))); ?> | OFS Tlaxcala</p>
+            <h1>Validar CFDI con SAT</h1>
+            <p><?php echo ucwords(str_replace('_', ' ', $role)); ?> | OFS Tlaxcala</p>
         </div>
     </div>
-    <nav class="header-actions" role="navigation" aria-label="Acciones principales">
-        <button type="button" class="btn-toggle" id="themeToggle" aria-label="Cambiar tema de color">
-            <i class="fas fa-adjust" aria-hidden="true"></i> Tema
-        </button>
-        <a href="../index.php" class="btn-back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Volver</a>
-    </nav>
+    <div class="header-actions">
+        <button type="button" class="btn-toggle" id="themeToggle"><i class="fas fa-adjust"></i> Tema</button>
+        <a href="../index.php" class="btn-back"><i class="fas fa-arrow-left"></i> Volver</a>
+    </div>
 </header>
 
-<main class="dashboard-main" role="main" id="mainContent">
+<main class="dashboard-main">
 <section class="tool-section">
-<h2><i class="fas fa-file-invoice-dollar" aria-hidden="true"></i> Extraer datos de Nómina</h2>
+<h2><i class="fas fa-check-circle"></i> Validar Autenticidad de XML (CFDI)</h2>
 
-<?php if ($error): ?><div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> <?php echo $error; ?></div><?php endif; ?>
-<?php if ($infoMessage): ?><div class="alert alert-success"><i class="fas fa-check-circle"></i> <?php echo $infoMessage; ?></div><?php endif; ?>
+<?php if ($error): ?>
+<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> <?php echo $error; ?></div>
+<?php endif; ?>
+
+<?php if ($infoMessage): ?>
+<div class="alert alert-success"><i class="fas fa-check-circle"></i> <?php echo $infoMessage; ?></div>
+<?php endif; ?>
+
+<?php if (!empty($validationStats)): ?>
+<div class="alert alert-info">
+    <i class="fas fa-chart-bar"></i>
+    <div>
+        <strong>Resultados de la validación:</strong>
+        <ul>
+            <?php if (!empty($validationStats['vigente'])): ?>
+                <li><strong>Vigentes:</strong> <?php echo $validationStats['vigente']; ?> CFDI</li>
+            <?php endif; ?>
+            <?php if (!empty($validationStats['cancelado'])): ?>
+                <li><strong>Cancelados:</strong> <?php echo $validationStats['cancelado']; ?> CFDI</li>
+            <?php endif; ?>
+            <?php if (!empty($validationStats['no_encontrado'])): ?>
+                <li><strong>No encontrados:</strong> <?php echo $validationStats['no_encontrado']; ?> CFDI</li>
+            <?php endif; ?>
+        </ul>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (!empty($warnings)): ?>
 <div class="alert alert-warning">
@@ -256,27 +281,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 <?php endif; ?>
 
 <div class="tool-instructions">
-<p>Suba uno o varios XML de nómina para extraer datos en Excel.</p>
-<div class="alert alert-info"><i class="fas fa-info-circle"></i> Complemento Nómina 1.2 soportado. Tamaño máximo por archivo: 8MB.</div>
+<p>Suba uno o varios archivos XML (CFDI) para verificar su autenticidad y estatus fiscal con el servicio del SAT.</p>
+<div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    El sistema conectará al servicio oficial del SAT para validar el UUID de cada CFDI.
+    Los resultados mostrarán si el comprobante está Vigente, Cancelado o No encontrado.
+    Tamaño máximo por archivo: 8MB. <strong>Requiere conexión a internet.</strong>
+</div>
 </div>
 
 <form method="POST" enctype="multipart/form-data">
 <div class="form-group">
-<label for="archivos_xml"><i class="fas fa-file-upload"></i> Seleccionar archivos XML</label>
+<label for="archivos_xml"><i class="fas fa-file-upload"></i> Seleccionar archivos XML (CFDI)</label>
 <input type="file" id="archivos_xml" name="archivos_xml[]" multiple accept=".xml" required>
 </div>
-<button type="submit" class="btn-process"><i class="fas fa-cogs"></i> Procesar Nómina</button>
+<button type="submit" class="btn-process"><i class="fas fa-cogs"></i> Validar con SAT</button>
 </form>
 
 <?php if ($downloadLink): ?>
 <div class="tool-output">
-    <p>El archivo está listo para descargar.</p>
-    <a href="<?php echo $downloadLink; ?>" class="btn-download"><i class="fas fa-download"></i> Descargar Excel</a>
+    <p>El reporte de validación está listo para descargar.</p>
+    <a href="<?php echo $downloadLink; ?>" class="btn-download"><i class="fas fa-download"></i> Descargar Reporte Excel</a>
 </div>
 <?php endif; ?>
-</section>
-</main>
-
 </section>
 </main>
 
