@@ -105,20 +105,138 @@ body {
 }
 
 .btn-toggle {
-  background: transparent;
+  background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 0.6rem 0.9rem;
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem 0.45rem 0.6rem;
   cursor: pointer;
+  transition: var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-toggle:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.theme-toggle {
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-toggle .theme-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  border-radius: 999px;
+  padding: 0.35rem;
+  width: 2rem;
+  height: 2rem;
+  color: var(--color-primary);
+  border: 1px solid var(--color-border);
+}
+
+.theme-toggle .theme-label {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.theme-toggle .theme-state {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.theme-toggle .theme-state-dark {
+  background: var(--color-accent);
+}
+
+body[data-theme="light"] .theme-toggle .theme-state-dark,
+body[data-theme="dark"] .theme-toggle .theme-state-light {
+  display: none;
+}
+
+.btn-toggle:hover .theme-icon {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-color: transparent;
+}
+
+.btn-back {
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 0.55rem 0.85rem;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: var(--transition);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-back:hover {
+  background: var(--color-primary-light);
+  color: #fff;
+}
+
+.primary-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 1.4rem;
+  margin: 0.6rem 2rem 0;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(6px);
+}
+
+body[data-theme="dark"] .primary-nav {
+  background: rgba(30, 41, 59, 0.6);
+}
+
+.primary-nav .nav-title {
+  font-weight: 600;
+  color: var(--color-muted);
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+}
+
+.primary-nav .nav-links {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.primary-nav .nav-link {
+  text-decoration: none;
+  color: var(--color-text);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  font-weight: 600;
   transition: var(--transition);
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
 }
 
-.btn-toggle:hover {
-  background: var(--color-border);
+.primary-nav .nav-link:hover,
+.primary-nav .nav-link.is-active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: transparent;
 }
 
 .user-info {
@@ -318,23 +436,6 @@ input[type="file"]:hover {
   transform: translateY(-1px);
 }
 
-.btn-back {
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-  text-decoration: none;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  transition: var(--transition);
-}
-
-.btn-back:hover {
-  border-color: var(--color-primary-light);
-  color: var(--color-primary-light);
-}
-
 /* =========================================================
    ALERTAS / MENSAJES
    ========================================================= */
@@ -472,6 +573,20 @@ body[data-theme="dark"] .alert-warning {
   .user-info {
     flex-direction: column;
     text-align: center;
+  }
+
+  .primary-nav {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.8rem 1.2rem;
+    margin: 0.6rem 1.2rem 0;
+    border-radius: 1.2rem;
+  }
+
+  .primary-nav .nav-links {
+    width: 100%;
+    justify-content: center;
   }
 
   .tools-grid {

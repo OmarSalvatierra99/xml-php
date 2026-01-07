@@ -193,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
 <head>
 <meta charset="UTF-8">
 <title>Extracción Nómina | OFS Tlaxcala</title>
-<link rel="stylesheet" href="../css/style.css?v=2">
+<link rel="stylesheet" href="../css/style.css?v=3">
 <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
 </head>
 <body data-theme="light">
@@ -213,12 +213,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivos_xml'])) {
         </div>
     </div>
     <nav class="header-actions" role="navigation" aria-label="Acciones principales">
-        <button type="button" class="btn-toggle" id="themeToggle" aria-label="Cambiar tema de color">
-            <i class="fas fa-adjust" aria-hidden="true"></i> Tema
+        <button type="button" class="btn-toggle theme-toggle" id="themeToggle" aria-label="Cambiar tema de color">
+            <span class="theme-icon" aria-hidden="true"><i class="fas fa-adjust"></i></span>
+            <span class="theme-label">Tema</span>
+            <span class="theme-state theme-state-light">Claro</span>
+            <span class="theme-state theme-state-dark">Oscuro</span>
         </button>
         <a href="../index.php" class="btn-back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Volver</a>
     </nav>
 </header>
+
+<nav class="primary-nav" role="navigation" aria-label="Navegación principal">
+    <div class="nav-title">Accesos rápidos</div>
+    <div class="nav-links">
+        <a class="nav-link" href="../index.php"><i class="fas fa-home" aria-hidden="true"></i> Inicio</a>
+        <a class="nav-link" href="extraer_xml.php"><i class="fas fa-file-code" aria-hidden="true"></i> Extraer XML</a>
+        <a class="nav-link is-active" href="extraer_nomina.php"><i class="fas fa-file-invoice-dollar" aria-hidden="true"></i> Extraer Nómina</a>
+        <a class="nav-link" href="clasificar_xml.php"><i class="fas fa-folder-tree" aria-hidden="true"></i> Clasificar</a>
+        <a class="nav-link" href="validar_xml.php"><i class="fas fa-check-circle" aria-hidden="true"></i> Validar</a>
+    </div>
+</nav>
 
 <main class="dashboard-main" role="main" id="mainContent">
 <section class="tool-section">
