@@ -9,7 +9,7 @@ import sys
 import json
 import pandas as pd
 from datetime import datetime
-from xml_utils import IssueTracker, load_xml_root, find_first, get_attr, print_progress
+from xml_utils import IssueTracker, load_xml_root, find_first, find_first_local, strip_namespace, get_attr, print_progress
 
 # Namespaces
 NAMESPACES_CFDI_40 = {
@@ -49,6 +49,12 @@ def extraer_datos_cfdi(filepath: str, tracker: IssueTracker) -> dict:
         comprobante = find_first(root, ".//cfdi:Comprobante", NAMESPACES_CFDI_33)
         namespaces = NAMESPACES_CFDI_33
 
+    # Si el comprobante es el nodo raíz o no se encontró por namespaces, buscar por nombre local
+    if comprobante is None and strip_namespace(root.tag) == "Comprobante":
+        comprobante = root
+    if comprobante is None:
+        comprobante = find_first_local(root, "Comprobante")
+
     if comprobante is None:
         tracker.error(f"'{filename}' no es un CFDI válido (no se encontró Comprobante)")
         return None
@@ -58,16 +64,22 @@ def extraer_datos_cfdi(filepath: str, tracker: IssueTracker) -> dict:
 
     # Extraer Emisor
     emisor = find_first(root, ".//cfdi:Emisor", namespaces)
+    if emisor is None:
+        emisor = find_first_local(root, "Emisor")
     rfc_emisor = get_attr(emisor, 'Rfc', '') if emisor is not None else ''
     nombre_emisor = get_attr(emisor, 'Nombre', '') if emisor is not None else ''
 
     # Extraer Receptor
     receptor = find_first(root, ".//cfdi:Receptor", namespaces)
+    if receptor is None:
+        receptor = find_first_local(root, "Receptor")
     rfc_receptor = get_attr(receptor, 'Rfc', '') if receptor is not None else ''
     nombre_receptor = get_attr(receptor, 'Nombre', '') if receptor is not None else ''
 
     # Extraer UUID del TimbreFiscalDigital
     tfd = find_first(root, ".//tfd:TimbreFiscalDigital", namespaces)
+    if tfd is None:
+        tfd = find_first_local(root, "TimbreFiscalDigital")
     uuid = get_attr(tfd, 'UUID', '') if tfd is not None else ''
 
     if not uuid:

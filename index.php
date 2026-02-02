@@ -7,9 +7,18 @@ include 'config.php';
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <script>
+    (function() {
+      try {
+        var savedTheme = localStorage.getItem('ofs-theme');
+        if (savedTheme) {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <title>Panel de Herramientas | OFS Tlaxcala</title>
-  <link rel="stylesheet" href="css/style.css?v=3">
-  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body data-theme="light">
 

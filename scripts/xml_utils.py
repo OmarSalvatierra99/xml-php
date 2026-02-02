@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
@@ -80,8 +81,22 @@ def load_xml_root(path: str, tracker: IssueTracker) -> Optional[ET.Element]:
         tree = ET.parse(path)
         root = tree.getroot()
     except Exception as exc:
-        tracker.fatal(f"No se pudo leer/parsing XML '{os.path.basename(path)}': {exc}")
-        return None
+        # Fallback: attempt to decode with alternative encodings
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text = raw.decode("latin-1")
+            # Remove invalid control chars that break XML parsing.
+            text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", text)
+            root = ET.fromstring(text)
+            tracker.warn(f"Se reparó la lectura XML con fallback de codificación en {os.path.basename(path)}")
+        except Exception as inner_exc:
+            tracker.fatal(f"No se pudo leer/parsing XML '{os.path.basename(path)}': {exc}")
+            tracker.error(f"Detalle fallback: {inner_exc}")
+            return None
     return root
 
 
@@ -99,6 +114,17 @@ def find_all(root: ET.Element, xpath: str, namespaces: Dict[str, str]) -> List[E
         return []
 
 
+def find_first_local(root: ET.Element, local_name: str) -> Optional[ET.Element]:
+    for elem in root.iter():
+        if strip_namespace(elem.tag) == local_name:
+            return elem
+    return None
+
+
+def find_all_local(root: ET.Element, local_name: str) -> List[ET.Element]:
+    return [elem for elem in root.iter() if strip_namespace(elem.tag) == local_name]
+
+
 def get_attr(element: Optional[ET.Element], attr: str, default: Optional[str] = None) -> Optional[str]:
     if element is None:
         return default
@@ -111,3 +137,19 @@ def safe_attrib(element: Optional[ET.Element]) -> Dict[str, str]:
 
 def print_progress(message: str) -> None:
     print(message, file=sys.stderr)
+
+
+def collect_namespace_uris(root: ET.Element) -> List[str]:
+    uris = set()
+    for elem in root.iter():
+        tag = elem.tag
+        if isinstance(tag, str) and tag.startswith("{") and "}" in tag:
+            uris.add(tag.split("}", 1)[0][1:])
+    return sorted(uris)
+
+
+def summarize_namespaces(root: ET.Element) -> str:
+    uris = collect_namespace_uris(root)
+    if not uris:
+        return "sin namespaces detectados"
+    return ", ".join(uris)

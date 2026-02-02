@@ -12,13 +12,16 @@ const ThemeManager = {
 
   init() {
     const body = document.body;
+    const root = document.documentElement;
     const toggle = document.getElementById('themeToggle');
 
     // Aplicar tema guardado
     const savedTheme = localStorage.getItem(this.storageKey);
-    if (savedTheme) {
-      body.setAttribute('data-theme', savedTheme);
-    }
+    const systemPrefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
+    body.setAttribute('data-theme', initialTheme);
+    root.setAttribute('data-theme', initialTheme);
+    this.syncToggle(initialTheme);
 
     // Event listener para toggle
     if (toggle) {
@@ -31,19 +34,32 @@ const ThemeManager = {
     const current = body.getAttribute('data-theme');
     const newTheme = current === 'dark' ? 'light' : 'dark';
 
-    body.setAttribute('data-theme', newTheme);
-    localStorage.setItem(this.storageKey, newTheme);
+    this.applyTheme(newTheme);
   },
 
   setTheme(theme) {
     if (theme !== 'light' && theme !== 'dark') return;
 
-    document.body.setAttribute('data-theme', theme);
-    localStorage.setItem(this.storageKey, theme);
+    this.applyTheme(theme);
   },
 
   getCurrentTheme() {
-    return document.body.getAttribute('data-theme') || 'light';
+    return document.documentElement.getAttribute('data-theme') || document.body.getAttribute('data-theme') || 'light';
+  },
+
+  applyTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(this.storageKey, theme);
+    this.syncToggle(theme);
+  },
+
+  syncToggle(theme) {
+    const toggle = document.getElementById('themeToggle');
+    if (!toggle) return;
+    const isDark = theme === 'dark';
+    toggle.classList.toggle('is-dark', isDark);
+    toggle.setAttribute('aria-pressed', isDark ? 'true' : 'false');
   }
 };
 
@@ -153,6 +169,10 @@ const LoadingManager = {
           <div class="spinner"></div>
           <h3 id="loadingMessage">Procesando...</h3>
           <p id="loadingSubtext">Esto puede tomar unos momentos</p>
+          <div class="loading-progress">
+            <div class="loading-progress-bar" id="loadingProgressBar"></div>
+          </div>
+          <div class="loading-progress-text" id="loadingProgressText">0%</div>
         </div>
       `;
 
@@ -166,15 +186,23 @@ const LoadingManager = {
 
     const messageEl = document.getElementById('loadingMessage');
     const subtextEl = document.getElementById('loadingSubtext');
+    const progressText = document.getElementById('loadingProgressText');
+    const progressBar = document.getElementById('loadingProgressBar');
 
     if (messageEl) messageEl.textContent = message;
     if (subtextEl) subtextEl.textContent = subtext;
+    if (progressText) progressText.textContent = '0%';
+    if (progressBar) progressBar.style.width = '0%';
 
     this.overlay.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
   },
 
   hide() {
+    if (this.progressTimer) {
+      clearInterval(this.progressTimer);
+      this.progressTimer = null;
+    }
     if (this.overlay) {
       this.overlay.style.display = 'none';
       document.body.style.overflow = ''; // Restore scrolling
@@ -187,6 +215,37 @@ const LoadingManager = {
 
     if (messageEl && message) messageEl.textContent = message;
     if (subtextEl && subtext) subtextEl.textContent = subtext;
+  },
+
+  startProgress(totalFiles = 0) {
+    const progressText = document.getElementById('loadingProgressText');
+    const progressBar = document.getElementById('loadingProgressBar');
+    if (!progressText || !progressBar) return;
+
+    if (this.progressTimer) {
+      clearInterval(this.progressTimer);
+    }
+
+    const baseSeconds = Math.max(6, Math.min(60, Math.round((totalFiles || 1) * 0.4)));
+    const start = Date.now();
+    const target = baseSeconds * 1000;
+    const maxFast = 92;
+    let lastPercent = 0;
+
+    this.progressTimer = setInterval(() => {
+      const elapsed = Date.now() - start;
+      let percent = Math.min(maxFast, Math.round((elapsed / target) * maxFast));
+
+      if (percent >= maxFast) {
+        percent = Math.min(98, lastPercent + 1);
+      }
+
+      if (percent !== lastPercent) {
+        progressBar.style.width = `${percent}%`;
+        progressText.textContent = `${percent}%`;
+        lastPercent = percent;
+      }
+    }, 500);
   }
 };
 
@@ -197,7 +256,16 @@ const LoadingManager = {
 const FileUploader = {
   inputId: 'archivos_xml',
   maxSize: 8 * 1024 * 1024, // 8MB
+  maxZipSize: 50 * 1024 * 1024, // 50MB
   allowedExtensions: ['xml'],
+  maxPreviewItems: 8,
+  wrapper: null,
+  clearButton: null,
+  label: null,
+  labelTitle: null,
+  labelSubtitle: null,
+  progressBar: null,
+  progressLabel: null,
 
   init(inputId = 'archivos_xml') {
     this.inputId = inputId;
@@ -205,33 +273,67 @@ const FileUploader = {
 
     if (!input) return;
 
+    this.wrapper = input.closest('.file-upload') || input.parentNode;
+    this.clearButton = this.wrapper ? this.wrapper.querySelector('.file-upload-clear') : null;
+    this.label = this.wrapper ? this.wrapper.querySelector('.file-upload-label') : null;
+    this.labelTitle = this.wrapper ? this.wrapper.querySelector('.file-upload-title') : null;
+    this.labelSubtitle = this.wrapper ? this.wrapper.querySelector('.file-upload-subtitle') : null;
+
+    if (input.dataset.maxSize) {
+      const maxSizeParsed = parseInt(input.dataset.maxSize, 10);
+      if (!Number.isNaN(maxSizeParsed) && maxSizeParsed > 0) {
+        this.maxSize = maxSizeParsed;
+      }
+    }
+
+    if (input.dataset.maxZipSize) {
+      const maxZipSizeParsed = parseInt(input.dataset.maxZipSize, 10);
+      if (!Number.isNaN(maxZipSizeParsed) && maxZipSizeParsed > 0) {
+        this.maxZipSize = maxZipSizeParsed;
+      }
+    }
+
+    if (this.label && this.labelTitle && this.labelSubtitle) {
+      this.label.dataset.defaultTitle = this.labelTitle.textContent.trim();
+      this.label.dataset.defaultSubtitle = this.labelSubtitle.textContent.trim();
+    }
+
+    if (this.clearButton) {
+      this.clearButton.addEventListener('click', () => this.clearSelection());
+    }
+
     // Event listeners
     input.addEventListener('change', (e) => this.handleFileSelect(e));
 
     // Drag and drop
     this.enableDragDrop(input);
+
+    // Initialize summary
+    this.ensureProgressElements();
+    this.updateSummary(input.files);
   },
 
   enableDragDrop(input) {
+    const dropzone = this.wrapper || input;
     const events = ['dragenter', 'dragover', 'dragleave', 'drop'];
 
     events.forEach(eventName => {
-      input.addEventListener(eventName, this.preventDefaults, false);
+      dropzone.addEventListener(eventName, this.preventDefaults, false);
     });
 
     ['dragenter', 'dragover'].forEach(eventName => {
-      input.addEventListener(eventName, () => {
-        input.classList.add('drag-active');
+      dropzone.addEventListener(eventName, () => {
+        dropzone.classList.add('drag-active');
       });
     });
 
     ['dragleave', 'drop'].forEach(eventName => {
-      input.addEventListener(eventName, () => {
-        input.classList.remove('drag-active');
+      dropzone.addEventListener(eventName, () => {
+        dropzone.classList.remove('drag-active');
       });
     });
 
-    input.addEventListener('drop', (e) => this.handleDrop(e));
+    dropzone.addEventListener('drop', (e) => this.handleDrop(e));
   },
 
   preventDefaults(e) {
@@ -256,6 +358,8 @@ const FileUploader = {
 
     if (files.length === 0) {
       this.clearPreview();
+      this.updateSummary(files);
+      this.setLabelState(false);
       return;
     }
 
@@ -266,15 +370,37 @@ const FileUploader = {
       Toast.error(validation.errors.join('<br>'));
       e.target.value = ''; // Clear input
       this.clearPreview();
+      this.updateSummary([]);
+      this.setLabelState(false);
       return;
+    }
+
+    if (validation.warnings.length) {
+      Toast.warning(validation.warnings.join('<br>'));
     }
 
     // Mostrar preview
     this.showPreview(files);
+    this.updateSummary(files);
+    this.setLabelState(true);
   },
 
   validateFiles(files) {
     const errors = [];
+    const warnings = [];
+    const maxFiles = this.getMaxFiles();
+    const hasZip = Array.from(files).some((file) => {
+      const ext = file.name.split('.').pop().toLowerCase();
+      return ext === 'zip';
+    });
+
+    if (maxFiles > 0 && files.length > maxFiles) {
+      warnings.push(`Seleccionaste ${files.length} archivos, pero el servidor permite máximo ${maxFiles} por carga. Divide en lotes para evitar omisiones.`);
+    }
+
+    if (files.length > 500 && !hasZip) {
+      errors.push('Si necesitas cargar más de 500 XML, súbelos en un archivo ZIP para que el sistema los descomprima automáticamente.');
+    }
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -282,12 +408,13 @@ const FileUploader = {
       // Validar extensión
       const ext = file.name.split('.').pop().toLowerCase();
       if (!this.allowedExtensions.includes(ext)) {
-        errors.push(`${file.name}: Solo se permiten archivos .xml`);
+        errors.push(`${file.name}: Solo se permiten archivos .xml o .zip`);
       }
 
       // Validar tamaño
-      if (file.size > this.maxSize) {
-        const sizeMB = (this.maxSize / 1024 / 1024).toFixed(0);
+      const sizeLimit = ext === 'zip' ? this.maxZipSize : this.maxSize;
+      if (file.size > sizeLimit) {
+        const sizeMB = (sizeLimit / 1024 / 1024).toFixed(0);
         errors.push(`${file.name}: Excede el límite de ${sizeMB}MB`);
       }
 
@@ -299,8 +426,16 @@ const FileUploader = {
 
     return {
       valid: errors.length === 0,
-      errors: errors
+      errors: errors,
+      warnings: warnings
     };
+  },
+
+  getMaxFiles() {
+    const input = document.getElementById(this.inputId);
+    if (!input) return 0;
+    const max = parseInt(input.dataset.maxFiles || '0', 10);
+    return Number.isNaN(max) ? 0 : max;
   },
 
   showPreview(files) {
@@ -313,18 +448,36 @@ const FileUploader = {
       container.className = 'file-preview-list';
 
       const input = document.getElementById(this.inputId);
-      input.parentNode.insertBefore(container, input.nextSibling);
+      const anchor = this.wrapper || input.parentNode;
+      anchor.parentNode.insertBefore(container, anchor.nextSibling);
     }
 
     // Limpiar contenido previo
     container.innerHTML = '';
     container.style.display = 'block';
+    if (this.wrapper) {
+      this.wrapper.classList.add('has-files');
+    }
 
     // Crear lista de archivos
-    for (let i = 0; i < files.length; i++) {
+    const limit = Math.min(files.length, this.maxPreviewItems);
+    for (let i = 0; i < limit; i++) {
       const file = files[i];
       const item = this.createPreviewItem(file, i);
       container.appendChild(item);
+    }
+
+    if (files.length > limit) {
+      const more = document.createElement('div');
+      more.className = 'file-preview-item file-preview-more';
+      more.innerHTML = `
+        <i class="fas fa-ellipsis-h file-preview-icon"></i>
+        <div class="file-preview-info">
+          <div class="file-preview-name">y ${files.length - limit} archivos más</div>
+          <div class="file-preview-size">La lista se compacta para mejorar el rendimiento.</div>
+        </div>
+      `;
+      container.appendChild(more);
     }
   },
 
@@ -336,9 +489,11 @@ const FileUploader = {
     const sizeText = sizeKB > 1024
       ? `${(sizeKB / 1024).toFixed(1)} MB`
       : `${sizeKB} KB`;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const icon = ext === 'zip' ? 'fa-file-archive' : 'fa-file-code';
 
     item.innerHTML = `
-      <i class="fas fa-file-code file-preview-icon"></i>
+      <i class="fas ${icon} file-preview-icon"></i>
       <div class="file-preview-info">
         <div class="file-preview-name">${this.escapeHtml(file.name)}</div>
         <div class="file-preview-size">${sizeText}</div>
@@ -371,9 +526,12 @@ const FileUploader = {
     // Actualizar preview
     if (input.files.length === 0) {
       this.clearPreview();
+      this.setLabelState(false);
     } else {
       this.showPreview(input.files);
+      this.setLabelState(true);
     }
+    this.updateSummary(input.files);
   },
 
   clearPreview() {
@@ -382,12 +540,90 @@ const FileUploader = {
       container.style.display = 'none';
       container.innerHTML = '';
     }
+    if (this.wrapper) {
+      this.wrapper.classList.remove('has-files');
+    }
+  },
+
+  updateSummary(files) {
+    const countEl = document.getElementById('fileCount');
+    const sizeEl = document.getElementById('fileTotalSize');
+    if (!countEl || !sizeEl) return;
+
+    const totalSize = Array.from(files || []).reduce((acc, file) => acc + (file.size || 0), 0);
+    const count = files ? files.length : 0;
+
+    countEl.textContent = `${count} archivo${count === 1 ? '' : 's'}`;
+    sizeEl.textContent = this.formatBytes(totalSize);
+    this.updateProgress(totalSize, count);
+  },
+
+  formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 MB';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / Math.pow(1024, idx);
+    return `${value.toFixed(value < 10 && idx > 0 ? 1 : 0)} ${units[idx]}`;
+  },
+
+  clearSelection() {
+    const input = document.getElementById(this.inputId);
+    if (!input) return;
+    input.value = '';
+    this.clearPreview();
+    this.updateSummary([]);
+    this.setLabelState(false);
   },
 
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  },
+
+  setLabelState(hasFiles) {
+    if (!this.labelTitle || !this.labelSubtitle) return;
+    if (hasFiles) {
+      this.labelTitle.textContent = 'Archivos listos para procesar';
+      this.labelSubtitle.textContent = 'Revisa la lista o ajusta tu selección antes de enviar.';
+    } else if (this.label && this.label.dataset.defaultTitle) {
+      this.labelTitle.textContent = this.label.dataset.defaultTitle;
+      this.labelSubtitle.textContent = this.label.dataset.defaultSubtitle || '';
+    }
+  },
+
+  ensureProgressElements() {
+    if (!this.wrapper || this.wrapper.querySelector('.file-upload-progress')) return;
+    const progress = document.createElement('div');
+    progress.className = 'file-upload-progress';
+    progress.innerHTML = '<div class="file-upload-progress-bar"></div>';
+
+    const label = document.createElement('div');
+    label.className = 'file-upload-progress-label';
+    label.textContent = 'Carga: 0 MB';
+
+    const meta = this.wrapper.querySelector('.file-upload-meta');
+    if (meta && meta.parentNode) {
+      meta.parentNode.insertBefore(progress, meta.nextSibling);
+      progress.insertAdjacentElement('afterend', label);
+    } else {
+      this.wrapper.appendChild(progress);
+      this.wrapper.appendChild(label);
+    }
+
+    this.progressBar = progress.querySelector('.file-upload-progress-bar');
+    this.progressLabel = label;
+  },
+
+  updateProgress(totalSize, count) {
+    if (!this.progressBar || !this.progressLabel) return;
+    const maxFiles = this.getMaxFiles();
+    const effectiveCount = Math.max(count || 1, 1);
+    const capacity = maxFiles > 0 ? this.maxSize * maxFiles : this.maxSize * effectiveCount;
+    const ratio = capacity > 0 ? Math.min(totalSize / capacity, 1) : 0;
+    this.progressBar.style.width = `${Math.round(ratio * 100)}%`;
+    const capacityLabel = this.formatBytes(capacity);
+    this.progressLabel.textContent = `Carga: ${this.formatBytes(totalSize)} de ${capacityLabel}`;
   }
 };
 
@@ -415,10 +651,16 @@ function initFormSubmitHandler() {
           Toast.error(validation.errors.join('<br>'));
           return false;
         }
+
+        if (validation.warnings.length) {
+          Toast.warning(validation.warnings.join('<br>'));
+        }
       }
 
       // Mostrar loading overlay
       LoadingManager.show('Procesando archivos...', 'Esto puede tomar unos momentos');
+      const totalFiles = fileInput && fileInput.files ? fileInput.files.length : 0;
+      LoadingManager.startProgress(totalFiles);
     });
   });
 }
@@ -488,6 +730,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Inicializar file uploader si existe
   if (document.getElementById('archivos_xml')) {
+    FileUploader.allowedExtensions = ['xml', 'zip'];
     FileUploader.init('archivos_xml');
   }
 

@@ -7,10 +7,13 @@ from typing import Dict, List, Optional, Set, Tuple
 from xml_utils import (
     IssueTracker,
     find_all,
+    find_all_local,
     find_first,
+    find_first_local,
     get_attr,
     load_xml_root,
     print_progress,
+    summarize_namespaces,
     to_float,
 )
 
@@ -24,7 +27,23 @@ NAMESPACES: Dict[str, str] = {
     "cfdi": "http://www.sat.gob.mx/cfd/4",
     "cfdi3": "http://www.sat.gob.mx/cfd/3",
     "nomina12": "http://www.sat.gob.mx/nomina12",
+    "tfd": "http://www.sat.gob.mx/TimbreFiscalDigital",
 }
+
+
+def _first_by_local_attr(root, local_name: str, must_have_any: Tuple[str, ...]) -> Optional[object]:
+    candidates = find_all_local(root, local_name)
+    for elem in candidates:
+        if any(get_attr(elem, attr) is not None for attr in must_have_any):
+            return elem
+    return candidates[0] if candidates else None
+
+
+def _nomina_elements(root, tag_name: str) -> List[object]:
+    elems = find_all(root, f".//nomina12:{tag_name}", NAMESPACES)
+    if not elems:
+        elems = find_all_local(root, tag_name)
+    return elems
 
 
 def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]:
@@ -48,7 +67,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
     deducciones_catalogo: Set[Tuple[str, str]] = set()
     subsidios_catalogo: Set[Tuple[str, str]] = set()
 
-    xml_files = [file for file in os.listdir(directorio) if file.lower().endswith(".xml")]
+    xml_files = sorted(file for file in os.listdir(directorio) if file.lower().endswith(".xml"))
     if not xml_files:
         tracker.fatal(f"No se encontraron archivos XML en {directorio}")
         return None
@@ -63,7 +82,16 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
             continue
 
         try:
-            for percepcion in find_all(root, ".//nomina12:Percepcion", NAMESPACES):
+            percepciones = _nomina_elements(root, "Percepcion")
+            deducciones = _nomina_elements(root, "Deduccion")
+            otros_pagos = _nomina_elements(root, "OtroPago")
+
+            if not (percepciones or deducciones or otros_pagos):
+                tracker.warn(
+                    f"{filename}: No se detectaron nodos de nómina. Namespaces encontrados: {summarize_namespaces(root)}"
+                )
+
+            for percepcion in percepciones:
                 tipo_percepcion = get_attr(percepcion, "TipoPercepcion") or ""
                 clave = get_attr(percepcion, "Clave") or ""
                 concepto = get_attr(percepcion, "Concepto") or ""
@@ -86,7 +114,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
                 if clave and concepto:
                     percepciones_catalogo.add((clave, concepto))
 
-            for deduccion in find_all(root, ".//nomina12:Deduccion", NAMESPACES):
+            for deduccion in deducciones:
                 tipo_deduccion = get_attr(deduccion, "TipoDeduccion") or ""
                 clave = get_attr(deduccion, "Clave") or ""
                 concepto = get_attr(deduccion, "Concepto") or ""
@@ -96,7 +124,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
                 if clave and concepto:
                     deducciones_catalogo.add((clave, concepto))
 
-            for otro_pago in find_all(root, ".//nomina12:OtroPago", NAMESPACES):
+            for otro_pago in otros_pagos:
                 tipo_otro_pago = get_attr(otro_pago, "TipoOtroPago") or ""
                 if tipo_otro_pago == "002":
                     clave = get_attr(otro_pago, "Clave") or ""
@@ -124,6 +152,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
 
     nomina_ws = wb.create_sheet("Nomina")
     nomina_headers = [
+        "UUID",
         "Consecutivo",
         "Núm Empleado",
         "Nombre",
@@ -162,15 +191,35 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
         if root is None:
             continue
 
-        receptor_cfdi = find_first(root, ".//cfdi:Receptor", NAMESPACES) or find_first(
-            root, ".//cfdi3:Receptor", NAMESPACES
-        )
+        receptor_cfdi = find_first(root, ".//cfdi:Receptor", NAMESPACES)
+        if receptor_cfdi is None:
+            receptor_cfdi = find_first(root, ".//cfdi3:Receptor", NAMESPACES)
+        if receptor_cfdi is None:
+            receptor_cfdi = _first_by_local_attr(
+                root, "Receptor", ("UsoCFDI", "RegimenFiscalReceptor", "DomicilioFiscalReceptor")
+            )
+
         receptor_nomina = find_first(root, ".//nomina12:Receptor", NAMESPACES)
+        if receptor_nomina is None:
+            receptor_nomina = _first_by_local_attr(root, "Receptor", ("NumEmpleado", "Curp"))
+
         nomina = find_first(root, ".//nomina12:Nomina", NAMESPACES)
+        if nomina is None:
+            nomina = find_first_local(root, "Nomina")
 
         if receptor_cfdi is None or receptor_nomina is None or nomina is None:
-            tracker.warn(f"Estructura de nómina incompleta en {filename}")
+            tracker.warn(
+                f"Estructura de nómina incompleta en {filename}. "
+                f"Receptor CFDI: {'OK' if receptor_cfdi is not None else 'No'}; "
+                f"Receptor Nómina: {'OK' if receptor_nomina is not None else 'No'}; "
+                f"Nomina: {'OK' if nomina is not None else 'No'}."
+            )
             continue
+
+        tfd = find_first(root, ".//tfd:TimbreFiscalDigital", NAMESPACES)
+        if tfd is None:
+            tfd = find_first_local(root, "TimbreFiscalDigital")
+        uuid = get_attr(tfd, "UUID") or ""
 
         num_empleado = get_attr(receptor_nomina, "NumEmpleado") or ""
         nombre = get_attr(receptor_cfdi, "Nombre") or ""
@@ -187,14 +236,14 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
 
         total_percepciones = to_float(get_attr(nomina, "TotalPercepciones"), 0.0, tracker, "TotalPercepciones")
         total_deducciones = to_float(get_attr(nomina, "TotalDeducciones"), 0.0, tracker, "TotalDeducciones")
-        total_subsidios = sum(
-            to_float(get_attr(otro_pago, "Importe"), 0.0, tracker, "Subsidios")
-            for otro_pago in find_all(root, ".//nomina12:OtroPago[@TipoOtroPago='002']", NAMESPACES)
-        )
+        total_subsidios = 0.0
+        for otro_pago in _nomina_elements(root, "OtroPago"):
+            if get_attr(otro_pago, "TipoOtroPago") == "002":
+                total_subsidios += to_float(get_attr(otro_pago, "Importe"), 0.0, tracker, "Subsidios")
         total_neto = total_percepciones - total_deducciones + total_subsidios
 
         conceptos_valores: Dict[str, float] = {header: "" for header in conceptos_headers}
-        for percepcion in find_all(root, ".//nomina12:Percepcion", NAMESPACES):
+        for percepcion in _nomina_elements(root, "Percepcion"):
             clave = get_attr(percepcion, "Clave") or ""
             concepto_texto = get_attr(percepcion, "Concepto") or ""
             importe_total = to_float(get_attr(percepcion, "ImporteGravado"), 0.0, tracker, "ImporteGravado") + to_float(
@@ -204,7 +253,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
             if header_key in conceptos_valores and conceptos_valores[header_key] in ("", None):
                 conceptos_valores[header_key] = importe_total
 
-        for deduccion in find_all(root, ".//nomina12:Deduccion", NAMESPACES):
+        for deduccion in _nomina_elements(root, "Deduccion"):
             clave = get_attr(deduccion, "Clave") or ""
             concepto_texto = get_attr(deduccion, "Concepto") or ""
             importe = to_float(get_attr(deduccion, "Importe"), 0.0, tracker, "Importe Deducción")
@@ -212,7 +261,9 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
             if header_key in conceptos_valores and conceptos_valores[header_key] in ("", None):
                 conceptos_valores[header_key] = importe
 
-        for otro_pago in find_all(root, ".//nomina12:OtroPago[@TipoOtroPago='002']", NAMESPACES):
+        for otro_pago in _nomina_elements(root, "OtroPago"):
+            if get_attr(otro_pago, "TipoOtroPago") != "002":
+                continue
             clave = get_attr(otro_pago, "Clave") or ""
             concepto_texto = get_attr(otro_pago, "Concepto") or ""
             importe = to_float(get_attr(otro_pago, "Importe"), 0.0, tracker, "Importe Subsidio")
@@ -222,6 +273,7 @@ def procesar_nomina_xml(directorio: str, tracker: IssueTracker) -> Optional[str]
 
         nomina_ws.append(
             [
+                uuid,
                 consecutivo,
                 num_empleado,
                 nombre,
